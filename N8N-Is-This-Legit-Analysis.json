@@ -1,0 +1,373 @@
+{
+  "name": "Is This Legit - Email Analysis",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "id": "cd558606-1ac0-4c8c-b075-0a22494cd148",
+      "name": "Every 5 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        16,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://us2.ninjarmm.com/oauth/token",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "grant_type",
+              "value": "client_credentials"
+            },
+            {
+              "name": "client_id",
+              "value": "YOUR_CLIENT_ID"
+            },
+            {
+              "name": "client_secret",
+              "value": "YOUR_CLIENT_SECRET"
+            },
+            {
+              "name": "scope",
+              "value": "monitoring management"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "58950053-86a7-4d27-96bd-e567c78f5f7c",
+      "name": "Get Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://us2.ninjarmm.com/api/v2/ticketing/trigger/board/1/run",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": " {\n\n  }\n",
+        "options": {}
+      },
+      "id": "52530276-6caf-4502-85e6-b1a158784110",
+      "name": "Fetch Unassigned Tickets",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        464,
+        0
+      ],
+      "credentials": {
+        "oAuth2Api": {
+          "id": "YOUR_OAUTH_CREDENTIAL_ID",
+          "name": "Ticketing App"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Filter tickets with \"is this legit\" in summary\n  const response = $input.first().json;\n\n  // The tickets are in the data array\n  const ticketList = response.data || response || [];\n\n  const filtered = ticketList.filter(ticket => {\n    const summary = (ticket.summary || '').toLowerCase();\n    const statusName = (ticket.status?.displayName || '').toUpperCase();\n\n    // Match NEW or OPEN status\n    return summary.includes('is this legit') && (statusName === 'NEW' || statusName === 'OPEN');\n  });\n\n  if (filtered.length === 0) {\n    return []; // No matching tickets, stop workflow\n  }\n\n  // Return each ticket as separate item for processing\n  return filtered.map(ticket => ({ json: ticket }));"
+      },
+      "id": "8fc49b4c-e0cf-4892-909b-a064eec5c68c",
+      "name": "Filter Is This Legit Tickets",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        688,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": " // Extract the forwarded email content from ticket\n  const ticket = $input.item.json;\n\n  // The description contains the forwarded email\n  let emailContent = ticket.description || '';\n\n  // Clean up HTML if present\n  emailContent = emailContent\n    .replace(/<br\\s*\\/?>/gi, '\\n')\n    .replace(/<\\/p>/gi, '\\n')\n    .replace(/<[^>]*>/g, '')\n    .replace(/&nbsp;/g, ' ')\n    .replace(/&amp;/g, '&')\n    .replace(/&lt;/g, '<')\n    .replace(/&gt;/g, '>')\n    .replace(/&quot;/g, '\"');\n\n  return [{\n    json: {\n      ticketId: ticket.id,\n      ticketSubject: ticket.summary,\n      originalDescription: ticket.description,\n      emailContent: emailContent,\n      requesterName: ticket.requester || 'User',\n      organization: ticket.organization\n    }\n  }];"
+      },
+      "id": "cb096bbb-ef2b-41cb-ac6b-4e9df0f0a0a3",
+      "name": "Extract Email Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        912,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": " const input = $input.item.json;\n  const extractData = $('Extract Email Content').first().json;\n\n  // Get the AI response text\n  const analysis = input.content[0].text;\n\n  // Extract verdict from analysis\n  let verdict = 'REVIEWED';\n  if (analysis.includes('VERDICT:** SAFE') || analysis.includes('VERDICT: SAFE')) {\n    verdict = 'SAFE';\n  } else if (analysis.includes('VERDICT:** SUSPICIOUS') || analysis.includes('VERDICT: SUSPICIOUS')) {\n    verdict = 'SUSPICIOUS';\n  } else if (analysis.includes('VERDICT:** DANGEROUS') || analysis.includes('VERDICT: DANGEROUS')) {\n    verdict = 'DANGEROUS';\n  }\n\n  // Format comment HTML\n  const commentHtml = `<h3>🤖 Automated Email Analysis</h3><p>${analysis.replace(/\\n/g, '<br>')}</p><p><em>Analyzed by Anevry Security Bot</em></p>`;\n\n  return [{\n    json: {\n      ticketId: extractData.ticketId,\n      originalSubject: extractData.ticketSubject,\n      newSubject: `${extractData.ticketSubject} - ${verdict}`,\n      verdict: verdict,\n      analysis: analysis,\n      commentBody: analysis,\n      commentHtml: commentHtml\n    }\n  }];"
+      },
+      "id": "dd36087a-8acd-4704-b2ed-3a6b2cd0780f",
+      "name": "Format Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://us2.ninjarmm.com/api/v2/ticketing/ticket/{{ $json.ticketId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1584,
+        0
+      ],
+      "id": "2f464a94-5145-4eca-93fd-c896033b5064",
+      "name": "Get Ticket Details",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "YOUR_OAUTH_CREDENTIAL_ID",
+          "name": "Ticketing App"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://us2.ninjarmm.com/api/v2/ticketing/ticket/{{ $('Get Ticket Details').item.json.id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "subject",
+              "value": "={{ $('Format Response').item.json.newSubject }}"
+            },
+            {
+              "name": "status",
+              "value": "RESOLVED"
+            },
+            {
+              "name": "requesterUid",
+              "value": "={{ $('Get Ticket Details').item.json.requesterUid }}"
+            },
+            {
+              "name": "clientId",
+              "value": "={{ $('Get Ticket Details').item.json.clientId || 1 }}"
+            },
+            {
+              "name": "ticketFormId",
+              "value": "={{ $('Get Ticket Details').item.json.ticketFormId }}"
+            },
+            {
+              "name": "version",
+              "value": "={{ $('Get Ticket Details').item.json.version }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1808,
+        0
+      ],
+      "id": "90d2bd8b-32d6-4fd3-a52f-140512d88049",
+      "name": "Update Ticket",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "YOUR_OAUTH_CREDENTIAL_ID",
+          "name": "Ticketing App"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const extractData = $input.first().json;\n  const apiKey = 'YOUR_ANTHROPIC_API_KEY';\n\n  const prompt = `You are a cybersecurity analyst helping non-technical users identify phishing and scam emails. Analyze the following email that a user forwarded asking \"Is this legit?\"\n\n  Provide your analysis in this format:\n\n  **VERDICT:** [SAFE / SUSPICIOUS / DANGEROUS]\n\n  **Summary:** (1-2 sentences a non-technical person can understand)\n\n  **Key Findings:**\n  - (bullet points of what you noticed)\n\n  **Recommendation:** (what the user should do)\n\n  ---\n\n  EMAIL TO ANALYZE:\n  ${extractData.emailContent}`;\n\n  const response = await this.helpers.httpRequest({\n    method: 'POST',\n    url: 'https://api.anthropic.com/v1/messages',\n    headers: {\n      'x-api-key': apiKey,\n      'anthropic-version': '2023-06-01',\n      'Content-Type': 'application/json'\n    },\n    body: {\n      model: 'claude-sonnet-4-20250514',\n      max_tokens: 1024,\n      messages: [\n        {\n          role: 'user',\n          content: prompt\n        }\n      ]\n    },\n    json: true\n  });\n\n  return [{\n    json: response\n  }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1136,
+        0
+      ],
+      "id": "55517761-e890-4612-a3f1-b5a7f5c85bac",
+      "name": "Claude Analyzes"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://us2.ninjarmm.com/api/v2/ticketing/ticket/{{ $('Format Response').item.json.ticketId }}/comment",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "comment",
+              "value": "={{ JSON.stringify({ public: true, body: $('Format Response').item.json.analysis, htmlBody: $('Format Response').item.json.commentHtml }) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2032,
+        0
+      ],
+      "id": "df1ee88c-6929-4fbd-834a-b52c1ee06057",
+      "name": "Add Analysis Comment",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "YOUR_OAUTH_CREDENTIAL_ID",
+          "name": "Ticketing App"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Every 5 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Get Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Token": {
+      "main": [
+        [
+          {
+            "node": "Fetch Unassigned Tickets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Unassigned Tickets": {
+      "main": [
+        [
+          {
+            "node": "Filter Is This Legit Tickets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Is This Legit Tickets": {
+      "main": [
+        [
+          {
+            "node": "Extract Email Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Response": {
+      "main": [
+        [
+          {
+            "node": "Get Ticket Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Email Content": {
+      "main": [
+        [
+          {
+            "node": "Claude Analyzes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Ticket Details": {
+      "main": [
+        [
+          {
+            "node": "Update Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude Analyzes": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add Analysis Comment": {
+      "main": [
+        []
+      ]
+    },
+    "Update Ticket": {
+      "main": [
+        [
+          {
+            "node": "Add Analysis Comment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1b6a92a0-0364-4391-90c3-bea24fb11480",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "YOUR_INSTANCE_ID"
+  },
+  "id": "YOUR_WORKFLOW_ID",
+  "tags": []
+}
