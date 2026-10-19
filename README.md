@@ -1,5 +1,5 @@
 # N8N-Ninja-workflows
-Just a place for some simple N8N workflows that are integrated with Anthropic (Claude AI) and NinjaOne RMM
+Just a place for some simple N8N workflows that are integrated with Anthropic (Claude AI), Have I been Pwned, and NinjaOne RMM
 
 First work flow will be a nifty little "report phish" option for Ninja Tickets. Users can forward an email they are suspicious of to the support email in Ninja that will auto generate a help desk ticket.  The user changes the subject to include "Is this legit" which is the search term N8N's trigger will be looking for.
 
